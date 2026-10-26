@@ -303,8 +303,18 @@ export class ProxyManager {
 
     // Build args: e.g. ["proxy", "--port", "8787", "--host", "127.0.0.1"]
     // or ["-m", "headroom.cli", "proxy", "--port", "8787", ...]
-    const spawnArgs = [...inv.args, "proxy", "--port", String(this.port), "--host", this.host];
-
+    // Build args: e.g. ["proxy", "--port", "8787", "--host", "127.0.0.1"]
+    // or ["-m", "headroom.cli", "proxy", "--port", "8787", ...]
+    const spawnArgs = [
+      ...inv.args,
+      "proxy",
+      "--port",
+      String(this.port),
+      "--host",
+      this.host,
+      "--compressor",
+      "smart_crusher,code_aware,log,tabular,config",
+    ];
     const proc = spawn(inv.cmd, spawnArgs, {
       stdio: ["ignore", "pipe", "pipe"],
       detached: false,
