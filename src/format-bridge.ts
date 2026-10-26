@@ -208,19 +208,18 @@ function alignUserMessage(comp: OpenAIMessage & { role: "system" | "user" }, ori
  * fields such as `thoughtSignature` and `textSignature`. Providers like Gemini
  * reject replayed tool calls whose signatures were dropped, and pi-ai discards
  * signatures on messages whose api/provider/model don't match the current model.
+ *
+ * Assistant text and thinking are always replayed verbatim from the original.
+ * They are the model's own prior output: if the proxy rewrites them (e.g. the
+ * tabular compressor turning markdown tables into JSON records), the model sees
+ * the rewritten format in its history and imitates it in new answers. Only tool
+ * call arguments are taken from the compressed message.
  */
 function alignAssistantMessage(comp: OpenAIMessage & { role: "assistant" }, orig: Message): Message {
   if (orig.role !== "assistant") return buildFreshAssistantMessage(comp);
-  if (isAssistantUnchanged(comp, orig)) return orig;
+  if (toolCallsUnchanged(comp, orig)) return orig;
 
-  const thinkingParts = orig.content.filter((p) => p.type === "thinking");
-
-  // A text signature is bound to the exact original text, so only keep it when the text is unchanged.
-  const text = assistantText(comp.content);
-  const origTextParts = orig.content.filter(isTextContent);
-  const textParts: TextContent[] = text === joinText(origTextParts)
-    ? origTextParts
-    : text ? [{ type: "text", text }] : [];
+  const nonToolParts = orig.content.filter((p) => !isToolCall(p));
 
   const origCallsById = new Map(orig.content.filter(isToolCall).map((tc) => [tc.id, tc]));
   const toolCallParts: PiToolCall[] = (comp.tool_calls ?? []).map((tc) => ({
@@ -233,14 +232,12 @@ function alignAssistantMessage(comp: OpenAIMessage & { role: "assistant" }, orig
 
   return {
     ...orig,
-    content: [...thinkingParts, ...textParts, ...toolCallParts],
+    content: [...nonToolParts, ...toolCallParts],
   };
 }
 
-/** True when compression left the assistant's text and tool calls untouched. */
-function isAssistantUnchanged(comp: OpenAIMessage & { role: "assistant" }, orig: PiAssistantMessage): boolean {
-  if (assistantText(comp.content) !== joinText(orig.content.filter(isTextContent))) return false;
-
+/** True when compression left the assistant's tool calls untouched. */
+function toolCallsUnchanged(comp: OpenAIMessage & { role: "assistant" }, orig: PiAssistantMessage): boolean {
   const origCalls = orig.content.filter(isToolCall);
   const compCalls = comp.tool_calls ?? [];
   if (compCalls.length !== origCalls.length) return false;
@@ -361,14 +358,6 @@ function isToolCall(part: AssistantPart): part is PiToolCall {
 /** Joins text blocks the same way `convertAssistantMessage` does, so results are comparable. */
 function joinText(parts: TextContent[]): string {
   return parts.map((p) => p.text).join("");
-}
-
-function assistantText(content: unknown): string {
-  if (typeof content === "string") return content;
-  if (Array.isArray(content)) {
-    return content.filter((p: any) => p?.type === "text").map((p: any) => p.text).join("");
-  }
-  return "";
 }
 
 function indexAssistantsByToolCallId(messages: Message[]): AssistantIndex {

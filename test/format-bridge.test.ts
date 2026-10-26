@@ -77,10 +77,43 @@ test("compressing tool results keeps thoughtSignature on tool calls", () => {
   assert.deepEqual((restored[2] as ToolResultMessage).content, [{ type: "text", text: "[compressed]" }]);
 });
 
-test("changed assistant text keeps tool call signatures and thinking, drops stale textSignature", () => {
+test("rewritten assistant text is replayed verbatim from the original", () => {
   const original = parallelToolCallConversation();
   const compressed = piToOpenAI(original).map((m) =>
     m.role === "assistant" ? { ...m, content: "Reading." } : m,
+  );
+
+  assert.deepEqual(openAIToPi(compressed, original)[1], original[1]);
+});
+
+test("markdown tables in text-only assistant replies are not replaced by JSON records", () => {
+  const table = "| Hoje | Lá |\n|---|---|\n| Wise | Mercury |\n| Cora | LLC |";
+  const original: Message[] = [
+    { role: "user", content: "qual estrutura?", timestamp: 0 },
+    geminiAssistant([{ type: "text", text: table, textSignature: "sig-table" }]),
+    { role: "user", content: "e o mercury?", timestamp: 3 },
+  ];
+  // What Headroom's tabular compressor returns for the table above.
+  const crushed = JSON.stringify([{ Hoje: "Wise", "Lá": "Mercury" }, { Hoje: "Cora", "Lá": "LLC" }]);
+  const compressed = piToOpenAI(original).map((m) =>
+    m.role === "assistant" ? { ...m, content: crushed } : m,
+  );
+
+  assert.deepEqual(openAIToPi(compressed, original)[1], original[1]);
+});
+
+test("compressed tool call arguments keep the original text, thinking and signatures", () => {
+  const original = parallelToolCallConversation();
+  const compressed = piToOpenAI(original).map((m) =>
+    m.role === "assistant" && m.tool_calls
+      ? {
+          ...m,
+          content: "Reading.",
+          tool_calls: m.tool_calls.map((tc) =>
+            tc.id === "call_b" ? { ...tc, function: { ...tc.function, arguments: '{"path":"b2.go"}' } } : tc,
+          ),
+        }
+      : m,
   );
   const assistant = asAssistant(openAIToPi(compressed, original)[1]);
 
@@ -89,9 +122,9 @@ test("changed assistant text keeps tool call signatures and thinking, drops stal
   assert.equal(assistant.model, "gemini-3.1-pro-preview");
   assert.deepEqual(assistant.content, [
     { type: "thinking", thinking: "Reading both files", thinkingSignature: "sig-thinking" },
-    { type: "text", text: "Reading." },
+    { type: "text", text: "Reading files.", textSignature: "sig-text" },
     { type: "toolCall", id: "call_a", name: "read", arguments: { path: "a.go" }, thoughtSignature: "sig-a" },
-    { type: "toolCall", id: "call_b", name: "read", arguments: { path: "b.go" } },
+    { type: "toolCall", id: "call_b", name: "read", arguments: { path: "b2.go" } },
   ]);
 });
 
